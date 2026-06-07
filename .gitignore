@@ -1,0 +1,11 @@
+.venv
+.vscode
+.pytest_cache
+.bin
+**__pycache__**
+.ruff_cache
+.coverage
+poetry.lock
+htmlcov
+.python-version
+.pytest_cache

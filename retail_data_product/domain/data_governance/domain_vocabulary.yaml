@@ -1,0 +1,190 @@
+domains:
+  - name: "data_governance"
+    description: >
+      Universal domain covering data quality, schema management, and architectural patterns.
+      These concepts apply across all business domains.
+      Organized following DDD tactical patterns with clear separation between
+      Value Objects, Entities, and Domain Services.
+
+    ddd_patterns:
+
+      # VALUE OBJECTS - Immutable concepts defined by their attributes
+      value_objects:
+
+        - name: DataQualityStatus
+          description: "Status of a data quality evaluation."
+          purpose: "Represents the outcome of DQ rule execution."
+          implementation: "Enum with FAILED and PASS states."
+          values: ["FAILED", "PASS"]
+
+        - name: DQCriticity
+          description: "Severity level of a data quality rule."
+          purpose: "Determines the impact level when DQ rules fail."
+          values: ["WARNING", "CRITICAL"]
+
+        - name: DQActionOnFail
+          description: "Action to take when a data quality rule fails."
+          purpose: "Defines system behavior on DQ rule failure."
+          values: ["ABORT_WORKFLOW", "REMOVE_ROW", "FLAG_ROW", "LOG"]
+
+        - name: DataQualityResult
+          description: "Immutable result of a single data quality rule evaluation."
+          purpose: "Encapsulates the outcome of evaluating one DQ rule against a dataset."
+          implementation: "Frozen dataclass"
+          attributes:
+            - dqr_name: "ID of the evaluated rule"
+            - status: "DataQualityStatus (FAILED/PASS)"
+            - action_fail: "DQActionOnFail to apply"
+            - dq_criticiy: "DQCriticity level"
+            - message: "Description of the result"
+
+        - name: DataType
+          description: "Supported data types in the system."
+          purpose: "Standardizes type definitions across different engines."
+          implementation: "Enum"
+          values: ["STRING", "INTEGER", "DOUBLE", "DATETIME", "DATE"]
+
+        - name: SchemaField
+          description: "Single field definition within a schema."
+          purpose: "Defines name, type, and constraints for one column."
+          implementation: "Frozen dataclass"
+          attributes:
+            - name: "Column name"
+            - data_type: "DataType enum value"
+            - description: "Human-readable description of the field"
+
+        - name: Schema
+          description: "Immutable definition of a data structure with fields and types."
+          purpose: "Defines expected structure for data validation and type enforcement."
+          implementation: "Frozen dataclass with validation"
+          attributes:
+            - fields: "Tuple of SchemaField objects defining the structure"
+          invariants:
+            - "Field names must be unique within a schema"
+
+        - name: TableDefinition
+          description: "Immutable configuration defining a table's metadata and structure."
+          purpose: "Provides table metadata without mutable state - configuration, not behavior."
+          implementation: "Frozen dataclass"
+          attributes:
+            - name: "Table name"
+            - description: "Human-readable description"
+            - schema: "Schema object defining structure"
+            - primary_key: "Tuple of column names forming the primary key"
+          invariants:
+            - "Primary key columns must exist in the schema"
+
+        - name: DataQualityRule
+          description: "Abstract base class for data quality validation rules."
+          purpose: "Encapsulates business rules for validating data integrity."
+          implementation: "Abstract dataclass with evaluate_dataframe method"
+          attributes:
+            - dqr_id: "Unique identifier for the rule"
+            - criticity: "DQCriticity level"
+            - action_on_fail: "DQActionOnFail behavior"
+          behavior:
+            - evaluate_dataframe: "Evaluates a Dataframe and returns DataQualityResult"
+          pre_built_rules:
+            - FieldIsNotNullRule: "Validates that a specific field has no null values"
+
+        - name: TransformationRule
+          description: "Abstract protocol for data transformation logic."
+          purpose: "Encapsulates business logic for transforming data between states."
+          implementation: "Protocol with apply method"
+          attributes:
+            - tfr_id: "Unique identifier for the rule"
+          behavior:
+            - apply: "Applies transformation to a Dataframe in-place"
+
+      # ENTITIES - Objects with unique identity and lifecycle
+      entities:
+
+        - name: Dataframe
+          description: "Domain wrapper around backend dataframe engines (Pandas/Spark)."
+          purpose: "Provides domain-specific operations while abstracting the underlying engine."
+          identity: "Internal dataframe_id"
+          capabilities:
+            - "Schema enforcement and validation"
+            - "Backend engine abstraction via DataFrameEngine port"
+            - "Domain-aware data operations (filter, count, etc.)"
+          operations:
+            - get_column_names: "Returns list of column names"
+            - count_rows: "Returns total row count"
+            - count_rows_where: "Counts rows matching a condition"
+            - filter_rows_by_condition: "Filters rows by condition"
+            - filter_rows_by_value_in_set: "Filters rows where column value is in set"
+
+        - name: DataQualityReport
+          description: "Entity collecting multiple DQ evaluation results."
+          purpose: "Provides consolidated view of data quality across all rules for a table."
+          identity: "Associated table name"
+          contains:
+            - "List of DataQualityResult objects"
+            - "Overall status calculation"
+          operations:
+            - add_a_data_quality_result: "Adds individual DQ result to the report"
+            - get_overall_status: "Computes aggregate status from all results"
+
+      # DOMAIN SERVICES - Stateless operations that don't belong to entities
+      domain_services:
+
+        - name: DataQualityChecker
+          description: "Domain Service that orchestrates data quality evaluation."
+          purpose: "Coordinates the evaluation of multiple DQ rules against a Dataframe."
+          stateless: true
+          operations:
+            - check: "Evaluates all rules against a Dataframe and returns DataQualityReport"
+          rationale: >
+            This is a Domain Service because:
+            - It operates on Entities (Dataframe)
+            - It uses Value Objects (DataQualityRule, TableDefinition)
+            - It has no state of its own
+            - The operation doesn't naturally belong to any Entity
+
+  - name: "architectural_patterns"
+    description: "Technical patterns and concepts used across the system."
+
+    patterns:
+      - name: "Domain-Driven Design"
+        description: "Tactical patterns for domain modeling."
+        tactical_patterns:
+          - value_objects: "Immutable objects defined by attributes (frozen dataclasses)"
+          - entities: "Objects with unique identity and lifecycle"
+          - domain_services: "Stateless operations that coordinate entities and value objects"
+        organization: >
+          The domain is organized by business concepts (orders, payments, campaigns, analytics)
+          rather than technical layers (bronze/silver/gold). Each concept owns its
+          tables, quality rules, and transformation rules.
+
+      - name: "Hexagonal Architecture"
+        description: "Ports and adapters pattern for technology independence."
+        components:
+          - domain: "Business logic isolated from technology (data_governance, retail)"
+          - application: "Use cases and port definitions (ports, use_cases)"
+          - adapters: "Technology implementations (Pandas, Spark, Delta Lake, CSV)"
+        ports:
+          - DataFrameEngine: "Abstract interface for dataframe operations"
+          - DataSource: "Abstract interface for reading data"
+          - DataTarget: "Abstract interface for writing data"
+        adapters:
+          - PandasDataFrameEngine: "Pandas implementation of DataFrameEngine"
+          - SparkDataFrameEngine: "Spark implementation of DataFrameEngine"
+          - CSVDataSource: "CSV file data source"
+          - DeltaDataSource: "Delta Lake data source"
+          - DeltaDataTarget: "Delta Lake data target"
+          - InMemoryDataSource: "In-memory data source for testing"
+          - InMemoryDataTarget: "In-memory data target for testing"
+
+    folder_structure:
+      domain:
+        data_governance:
+          entities: ["Dataframe", "DataQualityReport"]
+          value_objects: ["DataQualityStatus", "DQCriticity", "DQActionOnFail",
+                         "DataQualityResult", "Schema", "SchemaField", "DataType",
+                         "TableDefinition", "DataQualityRule", "TransformationRule"]
+          services: ["DataQualityChecker"]
+        retail:
+          orders: ["tables", "quality_rules", "transformation_rules"]
+          payments: ["tables", "quality_rules", "transformation_rules"]
+          campaigns: ["tables", "quality_rules", "transformation_rules"]
+          analytics: ["tables", "quality_rules", "transformation_rules"]

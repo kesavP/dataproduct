@@ -1,0 +1,206 @@
+data_product:
+  name: "sales_analytics"
+  domain: "retail"
+  owner: "data.team@shoply.com"
+  version: "2.0.0"
+  description: >
+    Data product describing consolidated e-commerce sales (orders, payments, campaigns).
+    Organized by business concepts following Domain-Driven Design principles.
+
+sources:
+  - name: "orders"
+    system: "E-commerce Platform"
+    format: "PostgreSQL"
+    refresh_rate: "every 6 hours"
+    contract:
+      schema:
+        order_id: string
+        order_date: date
+        customer_id: string
+        campaign_id: string
+        total_amount: double
+        currency: string
+      primary_key:
+        - order_id
+      foreign_keys:
+        - customer_id
+        - campaign_id
+
+  - name: "payments"
+    system: "Payment Gateway"
+    format: "API JSON"
+    refresh_rate: "every 6 hours"
+    contract:
+      schema:
+        payment_id: string
+        order_id: string
+        payment_status: string
+        payment_date: datetime
+      primary_key:
+        - payment_id
+      foreign_keys:
+        - order_id
+
+  - name: "campaigns"
+    system: "CRM"
+    format: "CSV"
+    refresh_rate: "daily"
+    contract:
+      schema:
+        campaign_id: string
+        channel: string
+        cost: double
+        start_date: date
+        end_date: date
+      primary_key:
+        - campaign_id
+
+business_concepts:
+
+  orders:
+    description: "Order management - tracks customer purchases from e-commerce platform."
+    tables:
+      - name: "orders_raw"
+        description: "Raw orders from E-commerce platform."
+        transformation_rules:
+          - "Upsert on order_id since last execution."
+          - "No modification: types specified in the contract are preserved."
+        quality_rules:
+          - name: "OrderIdNotNull"
+            description: "Each order must have a unique non-null identifier."
+            criticity: "CRITICAL"
+            action_on_fail: "ABORT_WORKFLOW"
+        depends_on:
+          - "sources.orders"
+
+      - name: "orders_enriched"
+        description: "Enriched orders with currency conversion and payment status."
+        transformation_rules:
+          - name: "JoinPaymentsRule"
+            description: "Join with payments table to get payment_status column."
+          - name: "ConvertCurrencyRule"
+            description: "Convert amounts to EUR according to exchange rates."
+        quality_rules:
+          - name: "PositiveTotalAmountRule"
+            description: "Total amount must be greater than 0."
+            criticity: "WARNING"
+            action_on_fail: "REMOVE_ROW"
+        depends_on:
+          - "orders.orders_raw"
+          - "payments.payments_cleaned"
+
+  payments:
+    description: "Payment processing - tracks payment transactions from payment gateway."
+    tables:
+      - name: "payments_raw"
+        description: "Raw payments from Payment Gateway."
+        transformation_rules:
+          - "Upsert based on payment_id."
+          - "No modification: types specified in the contract are preserved."
+        quality_rules:
+          - name: "PaymentIdNotNull"
+            description: "Each payment must have a unique non-null identifier."
+            criticity: "CRITICAL"
+            action_on_fail: "ABORT_WORKFLOW"
+        depends_on:
+          - "sources.payments"
+
+      - name: "payments_cleaned"
+        description: "Cleaned payment data with standardized status values."
+        transformation_rules:
+          - name: "CleanPaymentStatusRule"
+            description: "Clean payment_status column: convert to lowercase and remove spaces."
+        quality_rules:
+          - name: "ValidPaymentStatusRule"
+            description: "Payment status must belong to {success, failed, refunded}."
+            criticity: "WARNING"
+            action_on_fail: "REMOVE_ROW"
+        depends_on:
+          - "payments.payments_raw"
+
+  campaigns:
+    description: "Marketing campaigns - tracks marketing efforts and their performance."
+    tables:
+      - name: "campaigns_raw"
+        description: "Raw marketing campaigns from CRM system."
+        transformation_rules:
+          - "Upsert based on campaign_id."
+          - "No modification: types specified in the contract are preserved."
+        quality_rules:
+          - name: "CampaignIdNotNull"
+            description: "Each marketing campaign must have a unique non-null identifier."
+            criticity: "CRITICAL"
+            action_on_fail: "ABORT_WORKFLOW"
+        depends_on:
+          - "sources.campaigns"
+
+      - name: "campaigns_enriched"
+        description: "Enriched campaigns with calculated revenue per campaign."
+        transformation_rules:
+          - name: "CleanChannelRule"
+            description: "Clean channel column: convert to lowercase and remove spaces."
+          - name: "CalculateCampaignRevenueRule"
+            description: "Calculate campaign_revenue: sum total_amount_eur by campaign_id."
+        quality_rules:
+          - name: "ValidChannelRule"
+            description: "Campaign channel must belong to {email, sms}."
+            criticity: "WARNING"
+            action_on_fail: "REMOVE_ROW"
+        depends_on:
+          - "campaigns.campaigns_raw"
+          - "orders.orders_enriched"
+
+  analytics:
+    description: "Business analytics - computed metrics and aggregations for reporting."
+    tables:
+      - name: "campaign_rois"
+        description: "Campaign Return on Investment metrics."
+        transformation_rules:
+          - name: "CalculateRoiRule"
+            description: "Calculate marketing ROI per campaign: (Revenue - Cost) / Cost * 100."
+        quality_rules:
+          - name: "RoiValueBoundsRule"
+            description: "ROI must be bounded between -100% and 10000% to detect outliers."
+            criticity: "WARNING"
+            action_on_fail: "LOG"
+          - name: "AvailableDataRule"
+            description: "Dataframe must contain data (not empty)."
+            criticity: "CRITICAL"
+            action_on_fail: "ABORT_WORKFLOW"
+        depends_on:
+          - "campaigns.campaigns_enriched"
+
+      - name: "daily_gross_sales"
+        description: "Daily aggregated gross sales with gap filling for missing dates."
+        transformation_rules:
+          - name: "AggregateDailySalesRule"
+            description: "Aggregate total_amount_eur by day with order count."
+          - name: "FillMissingDatesRule"
+            description: "Missing days must be filled with 0 values."
+        quality_rules:
+          - name: "AvailableDataRule"
+            description: "Dataframe must contain data (not empty)."
+            criticity: "CRITICAL"
+            action_on_fail: "ABORT_WORKFLOW"
+        depends_on:
+          - "orders.orders_enriched"
+
+output:
+  tables:
+    - name: "daily_gross_sales"
+      description: "Daily aggregated view of consolidated sales."
+      refresh_rate: "daily"
+      schema:
+        order_date: date
+        gross_sales_eur: double
+        order_count: integer
+
+    - name: "campaign_rois"
+      description: "Analytical table by marketing campaign, calculating profitability (ROI)."
+      refresh_rate: "daily"
+      schema:
+        campaign_id: string
+        channel: string
+        cost: double
+        campaign_revenue: double
+        roi: double

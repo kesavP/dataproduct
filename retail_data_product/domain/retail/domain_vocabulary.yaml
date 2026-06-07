@@ -1,0 +1,205 @@
+domains:
+  - name: "retail_data_domain"
+    description: >
+      Business domain for e-commerce retail operations.
+      Organized by business concepts (Orders, Payments, Campaigns, Analytics)
+      following Domain-Driven Design principles.
+      Each concept owns its tables, quality rules, and transformation rules.
+
+    business_concepts:
+
+      orders:
+        description: "Order management - tracks customer purchases from e-commerce platform."
+
+        tables:
+          - name: ORDERS_RAW
+            description: "Raw orders from E-commerce platform."
+            primary_key: "order_id"
+            source_system: "E-commerce Platform"
+            refresh_frequency: "Every 6 hours"
+
+          - name: ORDERS_ENRICHED
+            description: "Enriched orders with currency conversion and payment status."
+            primary_key: "order_id"
+            transformations_applied:
+              - JoinPaymentsRule
+              - ConvertCurrencyRule
+
+        data_quality_rules:
+          - name: OrderIdNotNull
+            description: "Validates that order_id is never null."
+            criticity: "CRITICAL"
+            action_on_fail: "ABORT_WORKFLOW"
+            business_rationale: "Order ID is the primary key for all downstream processing."
+
+          - name: PositiveTotalAmountRule
+            description: "Validates that order amounts are positive values."
+            criticity: "WARNING"
+            action_on_fail: "REMOVE_ROW"
+            business_rationale: "Invalid amounts should be excluded from analytics."
+
+        transformation_rules:
+          - name: ConvertCurrencyRule
+            description: "Converts order amounts to EUR based on exchange rates."
+            transformation_type: "standardization"
+            parameters:
+              - exchange_rates: "dict[str, float] - currency to EUR conversion rates"
+
+          - name: JoinPaymentsRule
+            description: "Joins order data with payment information."
+            transformation_type: "enrichment"
+            dependencies:
+              - payments.PAYMENTS_CLEANED
+
+      payments:
+        description: "Payment processing - tracks payment transactions from payment gateway."
+
+        tables:
+          - name: PAYMENTS_RAW
+            description: "Raw payments from Payment Gateway."
+            primary_key: "payment_id"
+            source_system: "Payment Gateway"
+            refresh_frequency: "Every 6 hours"
+
+          - name: PAYMENTS_CLEANED
+            description: "Cleaned payment data with standardized status values."
+            primary_key: "payment_id"
+            transformations_applied:
+              - CleanPaymentStatusRule
+
+        data_quality_rules:
+          - name: PaymentIdNotNull
+            description: "Validates that payment_id is never null."
+            criticity: "CRITICAL"
+            action_on_fail: "ABORT_WORKFLOW"
+            business_rationale: "Payment ID is required for transaction tracking."
+
+          - name: ValidPaymentStatusRule
+            description: "Validates payment status against allowed values."
+            criticity: "WARNING"
+            action_on_fail: "REMOVE_ROW"
+            allowed_values: ["success", "failed", "refunded"]
+            business_rationale: "Invalid statuses break payment reconciliation."
+
+        transformation_rules:
+          - name: CleanPaymentStatusRule
+            description: "Standardizes payment status values (lowercase, trimmed)."
+            transformation_type: "cleaning"
+
+      campaigns:
+        description: "Marketing campaigns - tracks marketing efforts and their performance."
+
+        tables:
+          - name: CAMPAIGNS_RAW
+            description: "Raw marketing campaigns from CRM system."
+            primary_key: "campaign_id"
+            source_system: "CRM"
+            refresh_frequency: "Daily"
+
+          - name: CAMPAIGNS_ENRICHED
+            description: "Enriched campaigns with calculated revenue per campaign."
+            primary_key: "campaign_id"
+            transformations_applied:
+              - CleanChannelRule
+              - CalculateCampaignRevenueRule
+
+        data_quality_rules:
+          - name: CampaignIdNotNull
+            description: "Validates that campaign_id is never null."
+            criticity: "CRITICAL"
+            action_on_fail: "ABORT_WORKFLOW"
+            business_rationale: "Campaign ID is required for attribution analysis."
+
+          - name: ValidChannelRule
+            description: "Validates marketing channel against allowed values."
+            criticity: "WARNING"
+            action_on_fail: "REMOVE_ROW"
+            allowed_values: ["email", "sms"]
+            business_rationale: "Invalid channels affect marketing analytics accuracy."
+
+        transformation_rules:
+          - name: CleanChannelRule
+            description: "Standardizes channel names (lowercase, trimmed)."
+            transformation_type: "cleaning"
+
+          - name: CalculateCampaignRevenueRule
+            description: "Calculates total revenue per campaign from orders."
+            transformation_type: "aggregation"
+            dependencies:
+              - orders.ORDERS_ENRICHED
+
+      analytics:
+        description: "Business analytics - computed metrics and aggregations for reporting."
+
+        tables:
+          - name: CAMPAIGN_ROIS
+            description: "Campaign Return on Investment metrics. ROI = (revenue - cost) / cost * 100"
+            primary_key: "campaign_id"
+            key_metrics: ["cost", "campaign_revenue", "roi"]
+            transformations_applied:
+              - CalculateRoiRule
+
+          - name: DAILY_GROSS_SALES
+            description: "Daily aggregated gross sales with gap filling for missing dates."
+            primary_key: "order_date"
+            key_metrics: ["gross_sales_eur", "order_count"]
+            transformations_applied:
+              - AggregateDailySalesRule
+              - FillMissingDatesRule
+
+        data_quality_rules:
+          - name: RoiValueBoundsRule
+            description: "Validates that ROI values are within reasonable bounds."
+            criticity: "WARNING"
+            action_on_fail: "LOG"
+            bounds: [-100.0, 10000.0]
+            business_rationale: "Extreme ROI values may indicate data quality issues."
+
+          - name: AvailableDataRule
+            description: "Validates that the dataframe contains data (not empty)."
+            criticity: "CRITICAL"
+            action_on_fail: "ABORT_WORKFLOW"
+            business_rationale: "Analytics require sufficient data to be meaningful."
+
+        transformation_rules:
+          - name: AggregateDailySalesRule
+            description: "Aggregates orders into daily gross sales totals."
+            transformation_type: "aggregation"
+            parameters:
+              - date_column: "order_date"
+              - amount_column: "total_amount_eur"
+
+          - name: FillMissingDatesRule
+            description: "Fills missing dates in time series with default values (0)."
+            transformation_type: "gap_filling"
+            parameters:
+              - date_column: "order_date"
+              - fill_value: 0.0
+
+          - name: CalculateRoiRule
+            description: "Calculates ROI from cost and revenue columns."
+            transformation_type: "calculation"
+            formula: "ROI = (revenue - cost) / cost * 100"
+            parameters:
+              - cost_column: "cost"
+              - revenue_column: "campaign_revenue"
+
+    data_flows:
+      - name: "Order Processing Flow"
+        description: "Ingests and enriches order data with payments and currency conversion."
+        sequence:
+          - "orders.ORDERS_RAW → OrderIdNotNull"
+          - "payments.PAYMENTS_RAW → PaymentIdNotNull → CleanPaymentStatusRule → PAYMENTS_CLEANED"
+          - "orders.ORDERS_RAW → JoinPaymentsRule → ConvertCurrencyRule → PositiveTotalAmountRule → ORDERS_ENRICHED"
+
+      - name: "Campaign Attribution Flow"
+        description: "Enriches campaigns with revenue and calculates ROI."
+        sequence:
+          - "campaigns.CAMPAIGNS_RAW → CampaignIdNotNull"
+          - "campaigns.CAMPAIGNS_RAW → CleanChannelRule → ValidChannelRule → CalculateCampaignRevenueRule → CAMPAIGNS_ENRICHED"
+          - "campaigns.CAMPAIGNS_ENRICHED → CalculateRoiRule → RoiValueBoundsRule → CAMPAIGN_ROIS"
+
+      - name: "Sales Analytics Flow"
+        description: "Aggregates daily sales metrics from enriched orders."
+        sequence:
+          - "orders.ORDERS_ENRICHED → AggregateDailySalesRule → FillMissingDatesRule → AvailableDataRule → DAILY_GROSS_SALES"
