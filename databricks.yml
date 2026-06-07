@@ -1,0 +1,77 @@
+# Databricks Asset Bundle for the retail orders medallion pipeline.
+#
+# Build & deploy:
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev      # builds the wheel + creates the job
+#   databricks bundle run orders_pipeline -t dev
+#
+# The bundle builds the poetry project into a wheel (artifacts: ...) and runs it
+# as a Python wheel task. The wheel's `orders_pipeline` console script
+# (pyproject.toml [tool.poetry.scripts]) is the entry point.
+
+bundle:
+  name: retail-data-product
+
+artifacts:
+  default:
+    type: whl
+    build: poetry build
+    path: .
+
+# Bundle-wide defaults; per-target overrides live under `targets`.
+variables:
+  catalog:
+    description: Unity Catalog catalog for the medallion data.
+    default: main
+  schema:
+    description: Schema/database holding the orders tables.
+    default: retail
+  volume_path:
+    description: UC Volume base path for raw CSV inputs and Delta storage.
+    default: /Volumes/main/retail/landing
+
+resources:
+  jobs:
+    orders_pipeline:
+      name: "[${bundle.target}] orders-medallion-pipeline"
+      tasks:
+        - task_key: orders_medallion
+          job_cluster_key: pipeline_cluster
+          python_wheel_task:
+            package_name: retail_data_product
+            entry_point: orders_pipeline
+            parameters:
+              - "--orders-csv=${var.volume_path}/orders.csv"
+              - "--customers-csv=${var.volume_path}/customers.csv"
+              - "--catalog=${var.catalog}"
+              - "--schema=${var.schema}"
+          libraries:
+            - whl: ./dist/*.whl
+      job_clusters:
+        - job_cluster_key: pipeline_cluster
+          new_cluster:
+            # DBR ships pyspark + Delta, so the wheel relies on the runtime for
+            # those rather than installing them (avoids version conflicts).
+            spark_version: 15.4.x-scala2.12
+            data_security_mode: SINGLE_USER
+            num_workers: 1
+            node_type_id: Standard_DS3_v2  # Azure; use i3.xlarge on AWS, n2-standard-4 on GCP
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-XXXXXXXXXXXX.azuredatabricks.net
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-XXXXXXXXXXXX.azuredatabricks.net
+      root_path: /Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: main
+      schema: retail
+      volume_path: /Volumes/main/retail/landing
+    run_as:
+      service_principal_name: REPLACE_WITH_SP_APPLICATION_ID

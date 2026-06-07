@@ -10,6 +10,16 @@ from ..application.ports import DataTarget
 from ..domain.data_governance import Dataframe
 
 
+def _is_table_identifier(location: str) -> bool:
+    """Return True if ``location`` is a catalog table name rather than a path.
+
+    Storage paths contain a path separator (``/`` or ``\\``) or a URI scheme
+    (``dbfs:``, ``abfss://``, ``s3://`` ...). Anything else — e.g.
+    ``catalog.schema.table`` — is treated as a Unity Catalog managed table.
+    """
+    return not any(sep in location for sep in ("/", "\\", ":"))
+
+
 class DeltaDataTarget(DataTarget):
     """
     Delta Lake implementation of DataTarget port.
@@ -19,13 +29,19 @@ class DeltaDataTarget(DataTarget):
 
     def __init__(self, path: str, spark_session=None):
         """
-        Initialize Delta Lake data source/target.
+        Initialize Delta Lake data target.
 
         Args:
-            path: Path to Delta Lake table (can be local or cloud storage)
+            path: Either a storage path (local, ``dbfs:``, ``abfss://``, ``s3://``)
+                or a Unity Catalog table identifier (``catalog.schema.table``).
+                Identifiers without a path separator or URI scheme are treated as
+                UC managed tables and written with ``saveAsTable``.
             spark_session: Optional SparkSession. If None, creates a new one.
         """
-        self.path = Path(path).as_posix()  # Ensure forward slashes for cross-platform
+        self.is_table = _is_table_identifier(path)
+        # Storage paths get normalised to forward slashes; table identifiers are
+        # kept verbatim (``Path.as_posix`` leaves dotted names untouched anyway).
+        self.path = path if self.is_table else Path(path).as_posix()
         self.spark_session = spark_session
 
         if spark_session is None:
@@ -66,7 +82,7 @@ class DeltaDataTarget(DataTarget):
             if not data:
                 return
 
-            spark_engine = SparkDataFrameEngine(self.spark_session)
+            spark_engine = SparkDataFrameEngine(self.spark)
             spark_df = spark_engine.create_from_list_of_dict(data).sdf
         else:
             # Already a Spark engine
@@ -76,21 +92,30 @@ class DeltaDataTarget(DataTarget):
             if len(spark_df.columns) == 0 or spark_df.count() == 0:
                 return
 
-        # Check if table exists
-        delta_log = Path(self.path) / "_delta_log"
-
-        if not delta_log.exists():
-            # First write - create table
-            spark_df.write.format("delta").mode("overwrite").save(self.path)
+        # Resolve whether the target already exists, then either create it on the
+        # first write or merge (upsert) into the existing Delta table.
+        if self.is_table:
+            exists = self.spark.catalog.tableExists(self.path)
         else:
-            # Table exists - perform merge (upsert)
-            delta_table = DeltaTable.forPath(self.spark_session, self.path)  # pyright: ignore[reportArgumentType]
+            exists = (Path(self.path) / "_delta_log").exists()
 
-            # Create merge condition
-            merge_condition = (
-                f"target.{primary_key_column} = source.{primary_key_column}"
-            )
+        if not exists:
+            # First write - create the table.
+            writer = spark_df.write.format("delta").mode("overwrite")
+            if self.is_table:
+                writer.saveAsTable(self.path)
+            else:
+                writer.save(self.path)
+            return
 
-            delta_table.alias("target").merge(
-                spark_df.alias("source"), merge_condition
-            ).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
+        # Table exists - perform merge (upsert).
+        if self.is_table:
+            delta_table = DeltaTable.forName(self.spark, self.path)
+        else:
+            delta_table = DeltaTable.forPath(self.spark, self.path)
+
+        merge_condition = f"target.{primary_key_column} = source.{primary_key_column}"
+
+        delta_table.alias("target").merge(
+            spark_df.alias("source"), merge_condition
+        ).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()

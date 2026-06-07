@@ -9,6 +9,8 @@ from ..application.ports import DataSource, DataFrameEngine
 
 from ..domain.data_governance import Dataframe
 
+from .delta_data_target import _is_table_identifier
+
 
 class DeltaDataSource(DataSource):
     """
@@ -19,13 +21,17 @@ class DeltaDataSource(DataSource):
 
     def __init__(self, path: str, spark_session: Optional[SparkSession] = None):
         """
-        Initialize Delta Lake data source/target.
+        Initialize Delta Lake data source.
 
         Args:
-            path: Path to Delta Lake table (can be local or cloud storage)
+            path: Either a storage path (local, ``dbfs:``, ``abfss://``, ``s3://``)
+                or a Unity Catalog table identifier (``catalog.schema.table``).
+                Identifiers without a path separator or URI scheme are read as
+                UC managed tables via ``spark.read.table``.
             spark_session: Optional SparkSession. If None, creates a new one.
         """
-        self.path = Path(path).as_posix()  # Ensure forward slashes for cross-platform
+        self.is_table = _is_table_identifier(path)
+        self.path = path if self.is_table else Path(path).as_posix()
         self.spark_session = spark_session
 
         if spark_session is None:
@@ -54,9 +60,12 @@ class DeltaDataSource(DataSource):
         Returns:
             Dataframe domain object with the data
         """
-        # Read from Delta table
-        spark_df = self.spark_session.read.format("delta").load(self.path)  # pyright: ignore[reportOptionalMemberAccess]
-        spark_engine = SparkDataFrameEngine(spark=self.spark_session)
+        # Read from a UC managed table by name, or from a Delta path.
+        if self.is_table:
+            spark_df = self.spark.read.table(self.path)
+        else:
+            spark_df = self.spark.read.format("delta").load(self.path)
+        spark_engine = SparkDataFrameEngine(spark=self.spark)
         spark_engine.sdf = spark_df
 
         # If user wants a different engine, convert
