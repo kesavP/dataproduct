@@ -11,3 +11,6 @@ This demo project is meant to be deployed to a Spark environment.
 ```
 poetry install
 ```
+
+
+ rm -rf data/lakehouse && poetry run python run_orders_ingestion.py to run local
