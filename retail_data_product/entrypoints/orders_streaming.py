@@ -20,6 +20,7 @@ import argparse
 
 from pyspark.sql import DataFrame as SparkDataFrame
 from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType
 
 from retail_data_product.adapters import (
     AutoLoaderStreamSource,
@@ -30,7 +31,17 @@ from retail_data_product.adapters import (
 )
 from retail_data_product.application.use_cases.bronze.ingest_orders import IngestOrders
 from retail_data_product.application.use_cases.silver.clean_orders import CleanOrders
+from retail_data_product.domain.retail.orders import ORDERS_RAW
 from retail_data_product.entrypoints.orders_pipeline import StdoutDataQualityLogger
+
+
+def orders_spark_schema() -> StructType:
+    """Spark schema for incoming order files, derived from the domain contract.
+
+    Passed to Auto Loader as an explicit schema so the stream never has to infer
+    from the data and starts cleanly even on an empty landing directory.
+    """
+    return SparkDataFrameEngine._schema_to_spark_schema(ORDERS_RAW.schema)
 
 
 def make_batch_processor(
@@ -105,7 +116,8 @@ def main() -> None:
         schema_location=args.schema_location,
         file_format="csv",
         spark_session=spark,
-        reader_options={"header": "true", "cloudFiles.inferColumnTypes": "true"},
+        reader_options={"header": "true"},
+        schema=orders_spark_schema(),
     )
 
     trigger = (

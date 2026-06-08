@@ -17,7 +17,10 @@ a Databricks cluster (e.g. a continuous Job task), not locally.
 from pyspark.sql import SparkSession
 
 from retail_data_product.adapters import AutoLoaderStreamSource
-from retail_data_product.entrypoints.orders_streaming import make_batch_processor
+from retail_data_product.entrypoints.orders_streaming import (
+    make_batch_processor,
+    orders_spark_schema,
+)
 
 # -----------------------------------------------------------------------------
 # Configuration — point these at your Unity Catalog volume / catalog / schema.
@@ -47,7 +50,8 @@ def main() -> None:
         schema_location=SCHEMA_LOCATION,
         file_format="csv",
         spark_session=spark,
-        reader_options={"header": "true", "cloudFiles.inferColumnTypes": "true"},
+        reader_options={"header": "true"},
+        schema=orders_spark_schema(),
     )
 
     query = source.run(

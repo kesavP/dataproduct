@@ -5,6 +5,7 @@ from typing import Callable, Optional
 from pyspark.sql import DataFrame as SparkDataFrame
 from pyspark.sql import SparkSession
 from pyspark.sql.streaming import StreamingQuery
+from pyspark.sql.types import StructType
 
 
 # A foreachBatch callback: receives the bounded micro-batch DataFrame and its id.
@@ -34,23 +35,29 @@ class AutoLoaderStreamSource:
         file_format: str = "csv",
         spark_session: Optional[SparkSession] = None,
         reader_options: Optional[dict] = None,
+        schema: Optional[StructType] = None,
     ):
         """
         Args:
             path: Source directory Auto Loader watches (e.g. a UC Volume path).
-            schema_location: Location where Auto Loader persists the inferred
-                schema and tracks schema evolution (a durable path/checkpoint).
+            schema_location: Location where Auto Loader persists the schema and
+                tracks schema evolution (a durable path/checkpoint).
             file_format: Underlying file format ("csv", "json", "parquet", ...).
             spark_session: SparkSession; on Databricks pass the cluster session.
                 Falls back to ``getOrCreate`` (returns the cluster session there).
             reader_options: Extra reader options merged into the readStream, e.g.
                 ``{"header": "true", "cloudFiles.inferColumnTypes": "true"}``.
+            schema: Optional explicit Spark schema. When provided, Auto Loader
+                uses it instead of inferring from the data — so the stream starts
+                cleanly even when the source directory is still empty (avoids the
+                ``CF_EMPTY_DIR_FOR_SCHEMA_INFERENCE`` error on an always-on job).
         """
         self.path = path
         self.schema_location = schema_location
         self.file_format = file_format
         self.spark = spark_session or SparkSession.builder.getOrCreate()  # pyright: ignore[reportAttributeAccessIssue]
         self.reader_options = reader_options or {}
+        self.schema = schema
 
     def read_stream(self) -> SparkDataFrame:
         """Build the Auto Loader streaming DataFrame (unbounded)."""
@@ -61,6 +68,9 @@ class AutoLoaderStreamSource:
         )
         for key, value in self.reader_options.items():
             reader = reader.option(key, value)
+        # An explicit schema skips inference entirely (no empty-dir requirement).
+        if self.schema is not None:
+            reader = reader.schema(self.schema)
         return reader.load(self.path)
 
     def run(

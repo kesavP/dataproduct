@@ -34,9 +34,6 @@ variables:
   stream_landing_dir:
     description: Directory Auto Loader watches for new order files.
     default: /Volumes/main/retail/landing/orders_stream
-  stream_processing_time:
-    description: Micro-batch trigger interval for the streaming job.
-    default: 30 seconds
 
 resources:
   jobs:
@@ -44,7 +41,8 @@ resources:
       name: "[${bundle.target}] orders-medallion-pipeline"
       tasks:
         - task_key: orders_medallion
-          job_cluster_key: pipeline_cluster
+          # Serverless: attach an environment instead of a job cluster.
+          environment_key: default
           python_wheel_task:
             package_name: retail_data_product
             entry_point: orders_pipeline
@@ -53,28 +51,26 @@ resources:
               - "--customers-csv=${var.volume_path}/customers.csv"
               - "--catalog=${var.catalog}"
               - "--schema=${var.schema}"
-          libraries:
-            - whl: ./dist/*.whl
-      job_clusters:
-        - job_cluster_key: pipeline_cluster
-          new_cluster:
-            # DBR ships pyspark + Delta, so the wheel relies on the runtime for
-            # those rather than installing them (avoids version conflicts).
-            spark_version: 15.4.x-scala2.12
-            data_security_mode: SINGLE_USER
-            num_workers: 1
-            node_type_id: Standard_DS3_v2  # Azure; use i3.xlarge on AWS, n2-standard-4 on GCP
+      # On serverless, task libraries are declared via the environment's
+      # dependencies (the `libraries:` field is not supported). The bundle
+      # uploads the built wheel and rewrites this path on deploy. Spark + Delta
+      # come from the serverless runtime, so they are not listed here.
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"  # serverless env version (3 -> Python 3.12, matches pyproject)
+            dependencies:
+              - ./dist/*.whl
 
     orders_streaming:
       name: "[${bundle.target}] orders-medallion-streaming"
-      # `continuous` keeps exactly one run active and auto-restarts it: the
-      # right mode for an always-on Structured Streaming query. Pause/resume
-      # the stream by flipping pause_status (or via the UI / API).
-      continuous:
-        pause_status: UNPAUSED
+      # Triggered on-demand (no `continuous`, no `schedule`): each run uses Auto
+      # Loader's availableNow trigger to drain all pending files once and stop.
+      # Run it with: databricks bundle run orders_streaming -t dev
       tasks:
         - task_key: orders_stream
-          job_cluster_key: stream_cluster
+          # Serverless: attach an environment instead of a job cluster.
+          environment_key: default
           python_wheel_task:
             package_name: retail_data_product
             entry_point: orders_streaming
@@ -85,23 +81,20 @@ resources:
               - "--schema=${var.schema}"
               - "--schema-location=${var.volume_path}/_schemas/orders"
               - "--checkpoint-location=${var.volume_path}/_checkpoints/orders_stream"
-              - "--processing-time=${var.stream_processing_time}"
-          libraries:
-            - whl: ./dist/*.whl
-      job_clusters:
-        - job_cluster_key: stream_cluster
-          new_cluster:
-            spark_version: 15.4.x-scala2.12
-            data_security_mode: SINGLE_USER
-            num_workers: 1
-            node_type_id: Standard_DS3_v2  # Azure; use i3.xlarge on AWS, n2-standard-4 on GCP
+              - "--available-now"
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"  # serverless env version (3 -> Python 3.12, matches pyproject)
+            dependencies:
+              - ./dist/*.whl
 
 targets:
   dev:
     mode: development
     default: true
     workspace:
-      host: https://adb-XXXXXXXXXXXX.azuredatabricks.net
+      host: https://dbc-db4dd419-f099.cloud.databricks.com
 
   prod:
     mode: production
