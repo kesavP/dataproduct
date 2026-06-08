@@ -6,8 +6,10 @@
 #   databricks bundle run orders_pipeline -t dev
 #
 # The bundle builds the poetry project into a wheel (artifacts: ...) and runs it
-# as a Python wheel task. The wheel's `orders_pipeline` console script
-# (pyproject.toml [tool.poetry.scripts]) is the entry point.
+# as a Python wheel task. The wheel's console scripts (pyproject.toml
+# [tool.poetry.scripts]) are the entry points:
+#   orders_pipeline   - batch medallion job (run on demand / scheduled)
+#   orders_streaming  - Auto Loader streaming job (continuous)
 
 bundle:
   name: retail-data-product
@@ -29,6 +31,12 @@ variables:
   volume_path:
     description: UC Volume base path for raw CSV inputs and Delta storage.
     default: /Volumes/main/retail/landing
+  stream_landing_dir:
+    description: Directory Auto Loader watches for new order files.
+    default: /Volumes/main/retail/landing/orders_stream
+  stream_processing_time:
+    description: Micro-batch trigger interval for the streaming job.
+    default: 30 seconds
 
 resources:
   jobs:
@@ -52,6 +60,37 @@ resources:
           new_cluster:
             # DBR ships pyspark + Delta, so the wheel relies on the runtime for
             # those rather than installing them (avoids version conflicts).
+            spark_version: 15.4.x-scala2.12
+            data_security_mode: SINGLE_USER
+            num_workers: 1
+            node_type_id: Standard_DS3_v2  # Azure; use i3.xlarge on AWS, n2-standard-4 on GCP
+
+    orders_streaming:
+      name: "[${bundle.target}] orders-medallion-streaming"
+      # `continuous` keeps exactly one run active and auto-restarts it: the
+      # right mode for an always-on Structured Streaming query. Pause/resume
+      # the stream by flipping pause_status (or via the UI / API).
+      continuous:
+        pause_status: UNPAUSED
+      tasks:
+        - task_key: orders_stream
+          job_cluster_key: stream_cluster
+          python_wheel_task:
+            package_name: retail_data_product
+            entry_point: orders_streaming
+            parameters:
+              - "--landing-dir=${var.stream_landing_dir}"
+              - "--customers-csv=${var.volume_path}/customers.csv"
+              - "--catalog=${var.catalog}"
+              - "--schema=${var.schema}"
+              - "--schema-location=${var.volume_path}/_schemas/orders"
+              - "--checkpoint-location=${var.volume_path}/_checkpoints/orders_stream"
+              - "--processing-time=${var.stream_processing_time}"
+          libraries:
+            - whl: ./dist/*.whl
+      job_clusters:
+        - job_cluster_key: stream_cluster
+          new_cluster:
             spark_version: 15.4.x-scala2.12
             data_security_mode: SINGLE_USER
             num_workers: 1

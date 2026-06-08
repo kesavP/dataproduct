@@ -12,6 +12,7 @@ readme = "README.md"
 
 [tool.poetry.scripts]
 orders_pipeline = "retail_data_product.entrypoints.orders_pipeline:main"
+orders_streaming = "retail_data_product.entrypoints.orders_streaming:main"
 
 [tool.poetry.dependencies]
 python = "^3.12"
