@@ -9,6 +9,20 @@ from ..application.ports import DataSource, DataFrameEngine
 from ..domain.data_governance import Dataframe
 
 
+def _normalize_location(path: str) -> str:
+    """Normalise a local path without mangling cloud URIs.
+
+    ``Path(...).as_posix()`` collapses the ``//`` in a URI (e.g.
+    ``abfss://container@acct.dfs.core.windows.net/x`` -> ``abfss:/container...``),
+    which Spark cannot read. URIs (anything with a ``scheme://``) are passed
+    through untouched; only local filesystem paths are normalised to forward
+    slashes for cross-platform use.
+    """
+    if "://" in path:
+        return path
+    return Path(path).as_posix()
+
+
 class ParquetDataSource(DataSource):
     """
     Parquet implementation of the DataSource port.
@@ -19,10 +33,11 @@ class ParquetDataSource(DataSource):
     def __init__(self, path: str, spark_session: Optional[SparkSession] = None):
         """
         Args:
-            path: Path to the Parquet dataset directory (local or cloud storage)
+            path: Path to the Parquet dataset directory. Local paths and cloud
+                URIs (``abfss://``, ``wasbs://``, ``s3://`` ...) are both supported.
             spark_session: Optional SparkSession. If None, gets or creates one.
         """
-        self.path = Path(path).as_posix()  # Ensure forward slashes for cross-platform
+        self.path = _normalize_location(path)
         self.spark_session = spark_session or SparkSession.builder.getOrCreate()  # pyright: ignore[reportAttributeAccessIssue]
 
     def fetch(self, dataframe_engine: Type[DataFrameEngine]) -> "Dataframe":

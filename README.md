@@ -14,3 +14,8 @@ poetry install
 
 
  rm -rf data/lakehouse && poetry run python run_orders_ingestion.py to run local
+ 
+ databricks bundle deploy -t dev \
+  --var="orders_format=parquet" \
+  --var="orders_path=abfss://orders@<account>.dfs.core.windows.net/incoming/" \
+  --var="stream_landing_dir=abfss://orders@<account>.dfs.core.windows.net/incoming/"

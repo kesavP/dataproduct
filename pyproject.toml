@@ -7,7 +7,7 @@ packages = [
 name = "retail-data-product"
 version = "0.1.0"
 description = "This project aims to introduce the potential of mixing Domain Driven Design and hexagonal architecture style in data engineering projects that define data products."
-authors = ["Kesav<jagermister26@outlook.net>"]
+authors = ["Kesav <jagermister26@outlook.net>"]
 readme = "README.md"
 
 [tool.poetry.scripts]

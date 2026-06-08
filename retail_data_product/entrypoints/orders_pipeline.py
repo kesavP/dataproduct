@@ -10,7 +10,9 @@ adapters are wired to that injected session.
 Run locations are passed as Job parameters so the same wheel deploys to dev,
 staging and prod without code changes:
 
-    --orders-csv      Unity Catalog Volume path to the raw orders CSV
+    --orders-path     Path to the raw orders dataset (UC Volume or cloud URI
+                      such as abfss://...); CSV file or Parquet directory
+    --orders-format   Format of the orders dataset: "csv" (default) or "parquet"
     --customers-csv   Unity Catalog Volume path to the customers reference CSV
     --catalog         Unity Catalog catalog for the medallion tables
     --schema          Schema/database holding the orders tables
@@ -31,9 +33,10 @@ from retail_data_product.adapters import (
     CSVDataSource,
     DeltaDataSource,
     DeltaDataTarget,
+    ParquetDataSource,
     SparkDataFrameEngine,
 )
-from retail_data_product.application.ports import DataQualityLogger
+from retail_data_product.application.ports import DataQualityLogger, DataSource
 from retail_data_product.application.use_cases.bronze.ingest_orders import IngestOrders
 from retail_data_product.application.use_cases.silver.clean_orders import CleanOrders
 from retail_data_product.domain.data_governance import DataQualityReport
@@ -52,9 +55,21 @@ class StdoutDataQualityLogger(DataQualityLogger):
             print(f"  - {result}")
 
 
+def build_orders_source(
+    orders_format: str, path: str, spark: SparkSession
+) -> DataSource:
+    """Pick the source adapter for the orders dataset based on its format."""
+    if orders_format == "parquet":
+        return ParquetDataSource(path, spark_session=spark)
+    return CSVDataSource(path)
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Orders medallion pipeline")
-    parser.add_argument("--orders-csv", required=True)
+    parser.add_argument("--orders-path", required=True)
+    parser.add_argument(
+        "--orders-format", choices=("csv", "parquet"), default="csv"
+    )
     parser.add_argument("--customers-csv", required=True)
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--schema", required=True)
@@ -73,9 +88,12 @@ def main() -> None:
     silver_table = f"{args.catalog}.{args.schema}.orders_cleaned"
 
     # --- Bronze: land raw orders as-is into a UC managed Delta table. ---
-    print(f"=== Bronze: {args.orders_csv} -> {bronze_table} (UC managed) ===")
+    print(
+        f"=== Bronze: {args.orders_path} ({args.orders_format}) "
+        f"-> {bronze_table} (UC managed) ==="
+    )
     IngestOrders(
-        orders_source=CSVDataSource(args.orders_csv),
+        orders_source=build_orders_source(args.orders_format, args.orders_path, spark),
         orders_target=DeltaDataTarget(bronze_table, spark_session=spark),
         dataframe_engine=SparkDataFrameEngine,
         data_quality_logger=StdoutDataQualityLogger(),

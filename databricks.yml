@@ -31,6 +31,13 @@ variables:
   volume_path:
     description: UC Volume base path for raw CSV inputs and Delta storage.
     default: /Volumes/main/retail/landing
+  orders_path:
+    description: Path to the raw orders dataset (UC Volume path or cloud URI such
+      as abfss://...). A CSV file or a Parquet directory, per orders_format.
+    default: /Volumes/main/retail/landing/orders.csv
+  orders_format:
+    description: Format of the orders dataset - "csv" or "parquet".
+    default: csv
   stream_landing_dir:
     description: Directory Auto Loader watches for new order files.
     default: /Volumes/main/retail/landing/orders_stream
@@ -47,7 +54,8 @@ resources:
             package_name: retail_data_product
             entry_point: orders_pipeline
             parameters:
-              - "--orders-csv=${var.volume_path}/orders.csv"
+              - "--orders-path=${var.orders_path}"
+              - "--orders-format=${var.orders_format}"
               - "--customers-csv=${var.volume_path}/customers.csv"
               - "--catalog=${var.catalog}"
               - "--schema=${var.schema}"
@@ -76,6 +84,7 @@ resources:
             entry_point: orders_streaming
             parameters:
               - "--landing-dir=${var.stream_landing_dir}"
+              - "--orders-format=${var.orders_format}"
               - "--customers-csv=${var.volume_path}/customers.csv"
               - "--catalog=${var.catalog}"
               - "--schema=${var.schema}"

@@ -83,6 +83,10 @@ def make_batch_processor(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Streaming orders pipeline")
     parser.add_argument("--landing-dir", required=True, help="Auto Loader source dir")
+    parser.add_argument(
+        "--orders-format", choices=("csv", "parquet"), default="csv",
+        help="Format of the files Auto Loader ingests",
+    )
     parser.add_argument("--customers-csv", required=True)
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--schema", required=True)
@@ -111,12 +115,14 @@ def main() -> None:
     bronze_table = f"{args.catalog}.{args.schema}.orders_raw"
     silver_table = f"{args.catalog}.{args.schema}.orders_cleaned"
 
+    # `header` is CSV-only; Parquet carries its own schema in the file footer.
+    reader_options = {"header": "true"} if args.orders_format == "csv" else {}
     source = AutoLoaderStreamSource(
         path=args.landing_dir,
         schema_location=args.schema_location,
-        file_format="csv",
+        file_format=args.orders_format,
         spark_session=spark,
-        reader_options={"header": "true"},
+        reader_options=reader_options,
         schema=orders_spark_schema(),
     )
 
