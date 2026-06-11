@@ -7,8 +7,8 @@ from ...data_governance import (
 
 
 ORDERS_RAW = TableDefinition(
-    name="orders_raw",
-    description="Raw orders from E-commerce platform.",
+    name="clickstream",
+    description="Raw clickstream orders from E-commerce platform.",
     schema=Schema(
         fields=(
             SchemaField(
@@ -98,7 +98,7 @@ ORDERS_CLEANED = TableDefinition(
     description="""
     Cleaned orders for the silver layer:
     - Duplicate orders collapsed, keeping the latest order_date
-    - Enriched with the customer name from the customers reference data
+    - Enriched with customer name and payment status from clickstream data
     """,
     schema=Schema(
         fields=(
@@ -115,22 +115,27 @@ ORDERS_CLEANED = TableDefinition(
             SchemaField(
                 name="customer_name",
                 data_type=DataType.STRING,
-                description="Customer name resolved from the customers reference data",
+                description="Customer name from clickstream data",
             ),
             SchemaField(
-                name="total_amount",
+                name="total_amount_eur",
                 data_type=DataType.DOUBLE,
-                description="Total order amount in original currency",
-            ),
-            SchemaField(
-                name="currency",
-                data_type=DataType.STRING,
-                description="Currency code (USD, EUR, etc.)",
+                description="Total order amount converted to EUR",
             ),
             SchemaField(
                 name="campaign_id",
                 data_type=DataType.STRING,
                 description="Marketing campaign that led to this order",
+            ),
+            SchemaField(
+                name="payment_status",
+                data_type=DataType.STRING,
+                description="Payment status from clickstream data",
+            ),
+            SchemaField(
+                name="product_id",
+                data_type=DataType.STRING,
+                description="Product identifier from clickstream data",
             ),
         ),
     ),

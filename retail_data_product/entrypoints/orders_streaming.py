@@ -112,7 +112,7 @@ def main() -> None:
     spark = SparkSession.builder.getOrCreate()  # pyright: ignore[reportAttributeAccessIssue]
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {args.catalog}.{args.schema}")
 
-    bronze_table = f"{args.catalog}.{args.schema}.orders_raw"
+    bronze_table = f"{args.catalog}.{args.schema}.clickstream"
     silver_table = f"{args.catalog}.{args.schema}.orders_cleaned"
 
     # `header` is CSV-only; Parquet carries its own schema in the file footer.

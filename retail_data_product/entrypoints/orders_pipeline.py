@@ -18,7 +18,7 @@ staging and prod without code changes:
     --schema          Schema/database holding the orders tables
 
 Bronze/silver are written as Unity Catalog managed Delta tables
-(``<catalog>.<schema>.orders_raw`` and ``<catalog>.<schema>.orders_cleaned``);
+(``<catalog>.<schema>.clickstream`` and ``<catalog>.<schema>.orders_cleaned``);
 the Delta adapters detect the table identifier and use ``saveAsTable`` /
 ``spark.read.table`` instead of a storage path.
 """
@@ -61,6 +61,8 @@ def build_orders_source(
     """Pick the source adapter for the orders dataset based on its format."""
     if orders_format == "parquet":
         return ParquetDataSource(path, spark_session=spark)
+    if orders_format == "delta":
+        return DeltaDataSource(path, spark_session=spark)
     return CSVDataSource(path)
 
 
@@ -68,7 +70,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Orders medallion pipeline")
     parser.add_argument("--orders-path", required=True)
     parser.add_argument(
-        "--orders-format", choices=("csv", "parquet"), default="csv"
+        "--orders-format", choices=("csv", "parquet", "delta"), default="csv"
     )
     parser.add_argument("--customers-csv", required=True)
     parser.add_argument("--catalog", required=True)
@@ -84,20 +86,11 @@ def main() -> None:
 
     # Ensure the target schema exists, then address tables by their UC name.
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {args.catalog}.{args.schema}")
-    bronze_table = f"{args.catalog}.{args.schema}.orders_raw"
+    bronze_table = f"{args.catalog}.{args.schema}.clickstream"
     silver_table = f"{args.catalog}.{args.schema}.orders_cleaned"
 
-    # --- Bronze: land raw orders as-is into a UC managed Delta table. ---
-    print(
-        f"=== Bronze: {args.orders_path} ({args.orders_format}) "
-        f"-> {bronze_table} (UC managed) ==="
-    )
-    IngestOrders(
-        orders_source=build_orders_source(args.orders_format, args.orders_path, spark),
-        orders_target=DeltaDataTarget(bronze_table, spark_session=spark),
-        dataframe_engine=SparkDataFrameEngine,
-        data_quality_logger=StdoutDataQualityLogger(),
-    ).execute()
+    # --- Bronze: clickstream is an existing external table, skip ingestion ---
+    print(f"=== Bronze: Reading from existing external table {bronze_table} ===")
 
     # --- Silver: deduplicate (keep latest order_date) + enrich with name. ---
     print(f"=== Silver: {bronze_table} -> {silver_table} (UC managed) ===")

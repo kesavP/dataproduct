@@ -36,6 +36,41 @@ class JoinPaymentsRule:
 
 
 @dataclass
+class FormatCustomerIdRule:
+    """Formats customer_id to match customers reference format (CUST-{id}).
+
+    Only prepends CUST- if not already present.
+    """
+
+    tfr_id: str = "format_customer_id"
+
+    def apply(self, dataframe: Dataframe) -> None:
+        df_backend = dataframe.get_backend_dataframe()
+
+        def format_id(df):
+            # For Spark DataFrames
+            if hasattr(df, 'withColumn'):
+                import pyspark.sql.functions as F
+                return df.withColumn(
+                    "customer_id",
+                    F.when(
+                        F.col("customer_id").cast("string").startswith("CUST-"),
+                        F.col("customer_id").cast("string")
+                    ).otherwise(
+                        F.concat(F.lit("CUST-"), F.col("customer_id").cast("string"))
+                    )
+                )
+            # For Pandas DataFrames
+            else:
+                df["customer_id"] = df["customer_id"].astype(str).apply(
+                    lambda x: x if x.startswith("CUST-") else f"CUST-{x}"
+                )
+                return df
+
+        df_backend.sdf = format_id(df_backend.sdf)
+
+
+@dataclass
 class JoinCustomersRule:
     """
     Enriches orders with the customer name from the customers reference data.

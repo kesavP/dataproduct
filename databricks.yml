@@ -56,7 +56,7 @@ resources:
             parameters:
               - "--orders-path=${var.orders_path}"
               - "--orders-format=${var.orders_format}"
-              - "--customers-csv=${var.volume_path}/customers.csv"
+              - "--customers-csv=s3://databricks-order/customers.csv"
               - "--catalog=${var.catalog}"
               - "--schema=${var.schema}"
       # On serverless, task libraries are declared via the environment's
@@ -104,6 +104,17 @@ targets:
     default: true
     workspace:
       host: https://dbc-db4dd419-f099.cloud.databricks.com
+
+  s3:
+    mode: development
+    workspace:
+      host: https://dbc-db4dd419-f099.cloud.databricks.com
+    variables:
+      orders_path: s3://databricks-order/external-data/
+      orders_format: delta
+      catalog: main
+      schema: retail
+      volume_path: /Volumes/main/retail/landing
 
   prod:
     mode: production

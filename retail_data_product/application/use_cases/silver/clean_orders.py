@@ -13,6 +13,7 @@ from ....domain.retail.orders import (
     ORDERS_CLEANED,
     OrderIdNotNull,
     DuplicateOrdersRule,
+    FormatCustomerIdRule,
     JoinCustomersRule,
 )
 
@@ -21,7 +22,7 @@ class CleanOrders(BaseETLUseCase):
     """
     Silver Layer: Clean and enrich raw orders.
 
-    Reads the bronze ``orders_raw`` dataset and produces ``orders_cleaned`` by:
+    Reads the bronze ``clickstream`` dataset and produces ``orders_cleaned`` by:
     - collapsing duplicate orders, keeping the row with the latest ``order_date``
       (earlier duplicates are dropped),
     - enriching each order with the customer name from the customers reference
@@ -38,7 +39,7 @@ class CleanOrders(BaseETLUseCase):
     ):
         """
         Args:
-            orders_raw_source (DataSource): bronze.orders_raw table
+            orders_raw_source (DataSource): bronze.clickstream table
             orders_cleaned_target (DataTarget): silver.orders_cleaned table
             dataframe_engine (Type[DataFrameEngine]): data processing engine
             data_quality_logger (DataQualityLogger): logger for data quality results
@@ -65,9 +66,10 @@ class CleanOrders(BaseETLUseCase):
         if self._customers_source is None:
             return ()
         customers_df = self._customers_source.fetch(self._dataframe_engine)
-        # Enrich with customer_name, then drop the customer_id join key so the
-        # silver table exposes the human-readable name only.
+        # Format customer_id to match reference format, then join with customer names,
+        # and drop the customer_id join key so the silver table exposes the name only.
         return (
+            FormatCustomerIdRule(),
             JoinCustomersRule(customers_df=customers_df),
             DropColumnsRule(columns=("customer_id",)),
         )

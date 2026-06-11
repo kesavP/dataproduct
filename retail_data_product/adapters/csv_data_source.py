@@ -59,10 +59,14 @@ class CSVDataSource(DataSource):
             FileNotFoundError: If path doesn't exist
             ValueError: If no CSV files found in directory
         """
-        path = Path(self.path)
+        # Check if path is a cloud URI (S3, GCS, etc.)
+        is_cloud_path = self.path.startswith(("s3://", "gs://", "abfss://", "wasbs://"))
 
-        if not path.exists():
-            raise FileNotFoundError(f"CSV path not found: {self.path}")
+        # Only check local paths
+        if not is_cloud_path:
+            path = Path(self.path)
+            if not path.exists():
+                raise FileNotFoundError(f"CSV path not found: {self.path}")
 
         # Determine if Spark or Pandas engine
         engine_name = dataframe_engine.__name__
@@ -70,6 +74,9 @@ class CSVDataSource(DataSource):
         if "Spark" in engine_name:
             return self._read_with_spark()
         else:
+            # Pandas can't read cloud paths, must use Spark for S3/cloud
+            if is_cloud_path:
+                raise ValueError(f"Cloud paths ({self.path}) require Spark engine")
             return self._read_with_pandas()
 
     def _read_with_pandas(self) -> Dataframe:

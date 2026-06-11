@@ -34,7 +34,7 @@ class EnrichOrders(BaseETLUseCase):
     ):
         """
         Args:
-            orders_source (DataSource): bronze.orders_raw table
+            orders_source (DataSource): bronze.clickstream table
             payments_source (DataSource): silver.payments_cleaned table
             orders_enriched_target (DataTarget): silver.orders_enriched table
             dataframe_engine (Type[DataFrameEngine]): data procesing engine

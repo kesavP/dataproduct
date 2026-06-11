@@ -3,6 +3,7 @@ from .quality_rules import OrderIdNotNull, PositiveTotalAmountRule, DuplicateOrd
 from .transformation_rules import (
     ConvertCurrencyRule,
     JoinPaymentsRule,
+    FormatCustomerIdRule,
     JoinCustomersRule,
 )
 
@@ -18,5 +19,6 @@ __all__ = [
     # Transformation Rules
     "ConvertCurrencyRule",
     "JoinPaymentsRule",
+    "FormatCustomerIdRule",
     "JoinCustomersRule",
 ]
