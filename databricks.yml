@@ -39,8 +39,8 @@ variables:
     description: Format of the orders dataset - "csv" or "parquet".
     default: csv
   stream_landing_dir:
-    description: Directory Auto Loader watches for new order files.
-    default: /Volumes/main/retail/landing/orders_stream
+    description: S3 directory Auto Loader watches for new order files.
+    default: s3://databricks-order/landing/orders_stream
 
 resources:
   jobs:
@@ -72,9 +72,11 @@ resources:
 
     orders_streaming:
       name: "[${bundle.target}] orders-medallion-streaming"
-      # Triggered on-demand (no `continuous`, no `schedule`): each run uses Auto
-      # Loader's availableNow trigger to drain all pending files once and stop.
-      # Run it with: databricks bundle run orders_streaming -t dev
+      # Continuous streaming job: Reads from clickstream Delta table at S3
+      # Processes incremental changes in real-time using Spark Structured Streaming
+      max_concurrent_runs: 1
+      continuous:
+        pause_status: UNPAUSED
       tasks:
         - task_key: orders_stream
           # Serverless: attach an environment instead of a job cluster.
@@ -83,14 +85,14 @@ resources:
             package_name: retail_data_product
             entry_point: orders_streaming
             parameters:
-              - "--landing-dir=${var.stream_landing_dir}"
-              - "--orders-format=${var.orders_format}"
-              - "--customers-csv=${var.volume_path}/customers.csv"
+              - "--landing-dir=s3://databricks-order/external-data/"
+              - "--orders-format=parquet"
+              - "--customers-csv=s3://databricks-order/customers.csv"
               - "--catalog=${var.catalog}"
               - "--schema=${var.schema}"
               - "--schema-location=${var.volume_path}/_schemas/orders"
-              - "--checkpoint-location=${var.volume_path}/_checkpoints/orders_stream"
-              - "--available-now"
+              - "--checkpoint-location=s3://databricks-order/_checkpoints/orders_stream"
+              - "--processing-time=30 seconds"
       environments:
         - environment_key: default
           spec:
@@ -115,6 +117,7 @@ targets:
       catalog: main
       schema: retail
       volume_path: /Volumes/main/retail/landing
+      stream_landing_dir: s3://databricks-order/landing/orders_stream
 
   prod:
     mode: production

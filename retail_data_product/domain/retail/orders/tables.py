@@ -141,3 +141,48 @@ ORDERS_CLEANED = TableDefinition(
     ),
     primary_key=("order_id",),
 )
+
+
+ORDERS_TRANSFORMATION_DLQ = TableDefinition(
+    name="orders_transformation_dlq",
+    description="""
+    Dead Letter Queue for orders that fail transformation in the silver layer.
+    Records stored here failed during enrichment/deduplication and could not be
+    written to orders_cleaned. Includes the original record and error details.
+    """,
+    schema=Schema(
+        fields=(
+            SchemaField(
+                name="order_id",
+                data_type=DataType.STRING,
+                description="Unique identifier for the order (if extractable from record)",
+            ),
+            SchemaField(
+                name="transformation_rule_id",
+                data_type=DataType.STRING,
+                description="Identifier of the transformation rule that failed",
+            ),
+            SchemaField(
+                name="error_message",
+                data_type=DataType.STRING,
+                description="Error message from the transformation failure",
+            ),
+            SchemaField(
+                name="error_type",
+                data_type=DataType.STRING,
+                description="Type of error (e.g., KeyError, AttributeError, ValueError)",
+            ),
+            SchemaField(
+                name="original_record",
+                data_type=DataType.STRING,
+                description="JSON-serialized original record that failed",
+            ),
+            SchemaField(
+                name="captured_at",
+                data_type=DataType.STRING,
+                description="ISO timestamp when the record was captured to DLQ",
+            ),
+        ),
+    ),
+    primary_key=None,
+)

@@ -31,7 +31,7 @@ from retail_data_product.adapters import (
 )
 from retail_data_product.application.use_cases.bronze.ingest_orders import IngestOrders
 from retail_data_product.application.use_cases.silver.clean_orders import CleanOrders
-from retail_data_product.domain.retail.orders import ORDERS_RAW
+from retail_data_product.domain.retail.orders import ORDERS_RAW, ORDERS_TRANSFORMATION_DLQ
 from retail_data_product.entrypoints.orders_pipeline import StdoutDataQualityLogger
 
 
@@ -49,8 +49,17 @@ def make_batch_processor(
     bronze_table: str,
     silver_table: str,
     customers_csv: str,
+    dlq_table: str = None,
 ):
-    """Build the foreachBatch callback that runs Bronze then Silver per batch."""
+    """Build the foreachBatch callback that runs Bronze then Silver per batch.
+
+    Args:
+        spark: SparkSession
+        bronze_table: Target for raw orders (bronze layer)
+        silver_table: Target for cleaned orders (silver layer)
+        customers_csv: Path to customers reference CSV
+        dlq_table: Optional target for transformation failures in silver layer
+    """
 
     def process_batch(micro_batch: SparkDataFrame, batch_id: int) -> None:
         # The same micro-batch feeds both layers; cache so it isn't recomputed.
@@ -67,12 +76,17 @@ def make_batch_processor(
             ).execute()
 
             # Silver: dedup (keep latest order_date) + enrich, then MERGE upsert.
+            dlq_target = None
+            if dlq_table:
+                dlq_target = DeltaDataTarget(dlq_table, spark_session=spark)
+
             CleanOrders(
                 orders_raw_source=SparkDataFrameSource(micro_batch),
                 orders_cleaned_target=DeltaDataTarget(silver_table, spark_session=spark),
                 dataframe_engine=SparkDataFrameEngine,
                 data_quality_logger=StdoutDataQualityLogger(),
                 customers_source=CSVDataSource(customers_csv),
+                dlq_target=dlq_target,
             ).execute()
         finally:
             micro_batch.unpersist()
@@ -92,6 +106,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--schema", required=True)
     parser.add_argument("--schema-location", required=True, help="Auto Loader schema dir")
     parser.add_argument("--checkpoint-location", required=True)
+    parser.add_argument(
+        "--dlq-table",
+        default=None,
+        help="Optional Delta table for capturing transformation failures in silver layer",
+    )
     parser.add_argument(
         "--processing-time",
         default="30 seconds",
@@ -114,17 +133,17 @@ def main() -> None:
 
     bronze_table = f"{args.catalog}.{args.schema}.clickstream"
     silver_table = f"{args.catalog}.{args.schema}.orders_cleaned"
+    dlq_table = args.dlq_table or f"{args.catalog}.{args.schema}.orders_transformation_dlq"
 
-    # `header` is CSV-only; Parquet carries its own schema in the file footer.
-    reader_options = {"header": "true"} if args.orders_format == "csv" else {}
-    source = AutoLoaderStreamSource(
-        path=args.landing_dir,
-        schema_location=args.schema_location,
-        file_format=args.orders_format,
-        spark_session=spark,
-        reader_options=reader_options,
-        schema=orders_spark_schema(),
-    )
+    # Read from clickstream Delta table at S3 location
+    # Stream only new/changed records using Delta's built-in change tracking
+    print(f"=== Starting continuous stream from {args.landing_dir} ===")
+
+    streaming_df = spark.readStream \
+        .format("delta") \
+        .option("ignoreDeletes", "true") \
+        .option("ignoreChanges", "false") \
+        .load(args.landing_dir)
 
     trigger = (
         {"availableNow": True}
@@ -132,14 +151,16 @@ def main() -> None:
         else {"processingTime": args.processing_time}
     )
 
-    query = source.run(
-        process_batch=make_batch_processor(
-            spark, bronze_table, silver_table, args.customers_csv
-        ),
-        checkpoint_location=args.checkpoint_location,
-        trigger=trigger,
-        query_name="orders_medallion_stream",
-    )
+    query = streaming_df.writeStream \
+        .foreachBatch(
+            make_batch_processor(
+                spark, bronze_table, silver_table, args.customers_csv, dlq_table
+            )
+        ) \
+        .option("checkpointLocation", args.checkpoint_location) \
+        .trigger(**trigger) \
+        .queryName("orders_medallion_stream") \
+        .start()
 
     query.awaitTermination()
 
