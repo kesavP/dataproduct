@@ -92,11 +92,17 @@ def main() -> None:
     # --- Bronze: Create external table pointing to orders_path ---
     print(f"=== Bronze: Creating external table {bronze_table} from {args.orders_path} ===")
     format_spec = args.orders_format.upper()
-    spark.sql(f"""
-        CREATE TABLE IF NOT EXISTS {bronze_table}
-        USING {format_spec}
-        LOCATION '{args.orders_path}'
-    """)
+    try:
+        spark.sql(f"""
+            CREATE TABLE IF NOT EXISTS {bronze_table}
+            USING {format_spec}
+            LOCATION '{args.orders_path}'
+        """)
+    except Exception as e:
+        if "LOCATION_OVERLAP" in str(e) or "already exists" in str(e):
+            print(f"Table or table with overlapping location already exists: {str(e)}")
+        else:
+            raise
     print(f"=== Bronze: Reading from external table {bronze_table} ===")
 
     # --- Silver: deduplicate (keep latest order_date) + enrich with name. ---

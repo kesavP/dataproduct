@@ -1,0 +1,53 @@
+.dlq h2 {
+  margin-bottom: 1rem;
+  color: #2c3e50;
+}
+
+.description {
+  color: #7f8c8d;
+  margin-bottom: 2rem;
+}
+
+.empty-state {
+  background: #d5f4e6;
+  color: #27ae60;
+  padding: 2rem;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 1.1rem;
+}
+
+.table-wrapper {
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  overflow-x: auto;
+}
+
+.dlq-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.dlq-table thead {
+  background-color: #e74c3c;
+  color: white;
+}
+
+.dlq-table th {
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+}
+
+.dlq-table td {
+  padding: 1rem;
+  border-bottom: 1px solid #ecf0f1;
+  font-family: monospace;
+  font-size: 0.9rem;
+}
+
+.dlq-table tbody tr:hover {
+  background-color: #fadbd8;
+}

@@ -1,0 +1,17 @@
+{
+  "name": "retail-data-product",
+  "version": "0.1.0",
+  "description": "Full-stack data platform with medallion architecture",
+  "private": true,
+  "scripts": {
+    "dev": "docker-compose up",
+    "dev:stop": "docker-compose down",
+    "build": "docker-compose build",
+    "frontend:dev": "cd frontend && npm run dev",
+    "frontend:build": "cd frontend && npm run build",
+    "api:dev": "cd api && poetry run uvicorn main:app --reload"
+  },
+  "workspaces": [
+    "frontend"
+  ]
+}
