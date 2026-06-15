@@ -89,8 +89,15 @@ def main() -> None:
     bronze_table = f"{args.catalog}.{args.schema}.clickstream"
     silver_table = f"{args.catalog}.{args.schema}.orders_cleaned"
 
-    # --- Bronze: clickstream is an existing external table, skip ingestion ---
-    print(f"=== Bronze: Reading from existing external table {bronze_table} ===")
+    # --- Bronze: Create external table pointing to orders_path ---
+    print(f"=== Bronze: Creating external table {bronze_table} from {args.orders_path} ===")
+    format_spec = args.orders_format.upper()
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {bronze_table}
+        USING {format_spec}
+        LOCATION '{args.orders_path}'
+    """)
+    print(f"=== Bronze: Reading from external table {bronze_table} ===")
 
     # --- Silver: deduplicate (keep latest order_date) + enrich with name. ---
     print(f"=== Silver: {bronze_table} -> {silver_table} (UC managed) ===")

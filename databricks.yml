@@ -24,7 +24,7 @@ artifacts:
 variables:
   catalog:
     description: Unity Catalog catalog for the medallion data.
-    default: main
+    default: dev
   schema:
     description: Schema/database holding the orders tables.
     default: retail
@@ -114,7 +114,7 @@ targets:
     variables:
       orders_path: s3://databricks-order/external-data/
       orders_format: delta
-      catalog: main
+      catalog: dev
       schema: retail
       volume_path: /Volumes/main/retail/landing
       stream_landing_dir: s3://databricks-order/landing/orders_stream
