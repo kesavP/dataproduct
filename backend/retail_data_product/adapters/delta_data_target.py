@@ -38,10 +38,20 @@ class DeltaDataTarget(DataTarget):
                 UC managed tables and written with ``saveAsTable``.
             spark_session: Optional SparkSession. If None, creates a new one.
         """
+        if not path or not str(path).strip():
+            raise ValueError(f"path cannot be null or empty. Received: {repr(path)}")
+
         self.is_table = _is_table_identifier(path)
-        # Storage paths get normalised to forward slashes; table identifiers are
-        # kept verbatim (``Path.as_posix`` leaves dotted names untouched anyway).
-        self.path = path if self.is_table else Path(path).as_posix()
+        # Storage paths: use Path for local paths, keep URIs verbatim (they already use forward slashes).
+        # Table identifiers are kept verbatim.
+        if self.is_table:
+            self.path = path
+        elif "://" in path:
+            # Cloud URI (s3://, abfss://, dbfs://, etc.) - keep as-is
+            self.path = path
+        else:
+            # Local filesystem path - normalize to forward slashes
+            self.path = Path(path).as_posix()
         self.spark_session = spark_session
 
         if spark_session is None:
@@ -101,21 +111,40 @@ class DeltaDataTarget(DataTarget):
 
         if not exists:
             # First write - create the table.
-            writer = spark_df.write.format("delta").mode("overwrite")
+            writer = spark_df.write.format("delta").mode("overwrite").option("mergeSchema", "true")
             if self.is_table:
                 writer.saveAsTable(self.path)
             else:
                 writer.save(self.path)
             return
 
-        # Table exists - perform merge (upsert).
-        if self.is_table:
-            delta_table = DeltaTable.forName(self.spark, self.path)
-        else:
-            delta_table = DeltaTable.forPath(self.spark, self.path)
+        # Table exists - check for schema compatibility before merge.
+        try:
+            if self.is_table:
+                delta_table = DeltaTable.forName(self.spark, self.path)
+            else:
+                delta_table = DeltaTable.forPath(self.spark, self.path)
 
-        merge_condition = f"target.{primary_key_column} = source.{primary_key_column}"
+            merge_condition = f"target.{primary_key_column} = source.{primary_key_column}"
 
-        delta_table.alias("target").merge(
-            spark_df.alias("source"), merge_condition
-        ).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
+            delta_table.alias("target").merge(
+                spark_df.alias("source"), merge_condition
+            ).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
+        except Exception as e:
+            # If schema mismatch, drop and recreate the table
+            if "DELTA_METADATA_MISMATCH" in str(e) or "schema mismatch" in str(e).lower():
+                print(f"Schema mismatch detected. Dropping and recreating table: {self.path}")
+                if self.is_table:
+                    self.spark.sql(f"DROP TABLE IF EXISTS {self.path}")
+                else:
+                    import shutil
+                    shutil.rmtree(self.path, ignore_errors=True)
+
+                # Recreate the table with the new schema
+                writer = spark_df.write.format("delta").mode("overwrite").option("mergeSchema", "true")
+                if self.is_table:
+                    writer.saveAsTable(self.path)
+                else:
+                    writer.save(self.path)
+            else:
+                raise

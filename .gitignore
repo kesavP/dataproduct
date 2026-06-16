@@ -66,3 +66,6 @@ data/
 # Dependencies
 backend/.venv/
 api/.venv/
+
+#UV
+uv.lock

@@ -12,10 +12,16 @@ function Layout({ children }) {
               <Link to="/" className="nav-link">Dashboard</Link>
             </li>
             <li className="nav-item">
+              <Link to="/bronze" className="nav-link">Bronze</Link>
+            </li>
+            <li className="nav-item">
               <Link to="/orders" className="nav-link">Orders</Link>
             </li>
             <li className="nav-item">
               <Link to="/dlq" className="nav-link">DLQ</Link>
+            </li>
+            <li className="nav-item">
+              <Link to="/clickstream" className="nav-link">Clickstream</Link>
             </li>
           </ul>
         </div>

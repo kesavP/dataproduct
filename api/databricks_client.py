@@ -59,6 +59,20 @@ class DatabricksSQLClient:
         """
         return self.execute_query(query)
 
+    def get_bronze_data(self, limit: int = 100, offset: int = 0) -> List[Dict]:
+        """Get raw clickstream data from bronze layer."""
+        query = f"""
+            SELECT * FROM {self.catalog}.{self.schema}.clickstream
+            LIMIT {limit} OFFSET {offset}
+        """
+        return self.execute_query(query)
+
+    def get_bronze_count(self) -> int:
+        """Get total count of bronze layer records."""
+        query = f"SELECT COUNT(*) as count FROM {self.catalog}.{self.schema}.clickstream"
+        result = self.execute_query(query)
+        return result[0]["count"] if result else 0
+
     def get_pipeline_metrics(self) -> Dict[str, Any]:
         """Get pipeline metrics."""
         queries = {
@@ -66,7 +80,7 @@ class DatabricksSQLClient:
             "silver": f"SELECT COUNT(*) as count FROM {self.catalog}.{self.schema}.orders_cleaned",
             "dlq": f"SELECT COUNT(*) as count FROM {self.catalog}.{self.schema}.orders_transformation_dlq",
         }
-        
+
         metrics = {}
         for layer, query in queries.items():
             try:
@@ -74,5 +88,5 @@ class DatabricksSQLClient:
                 metrics[f"{layer}_count"] = result[0]["count"] if result else 0
             except Exception:
                 metrics[f"{layer}_count"] = 0
-        
+
         return metrics

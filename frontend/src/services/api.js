@@ -14,8 +14,24 @@ export const ordersAPI = {
 
 export const pipelineAPI = {
   getMetrics: () => apiClient.get('/pipeline/metrics'),
-  getDLQ: (limit = 100) => 
+  getDLQ: (limit = 100) =>
     apiClient.get('/pipeline/dlq', { params: { limit } }),
+}
+
+export const bronzeAPI = {
+  getData: (limit = 100, offset = 0) =>
+    apiClient.get('/bronze', { params: { limit, offset } }),
+  getCount: () =>
+    apiClient.get('/bronze/count'),
+}
+
+export const databricksAPI = {
+  executeQuery: (statement, warehouseId = null, byteLimit = 16777216) =>
+    apiClient.post('/databricks/query', {
+      statement,
+      warehouse_id: warehouseId,
+      byte_limit: byteLimit
+    }),
 }
 
 export default apiClient

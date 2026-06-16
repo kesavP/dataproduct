@@ -3,10 +3,22 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 import os
+import sys
+import httpx
+import asyncio
+import logging
+from pathlib import Path
 from dotenv import load_dotenv
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+# Add the api directory to the path so we can import databricks_client
+sys.path.insert(0, str(Path(__file__).parent))
+from databricks_client import DatabricksSQLClient
 
 load_dotenv()
 
@@ -50,6 +62,12 @@ class OrderRow(BaseModel):
     campaign_id: str
     payment_status: str
     product_id: str
+
+
+class DatabricksStatementRequest(BaseModel):
+    statement: str
+    warehouse_id: Optional[str] = None
+    byte_limit: Optional[int] = 16777216
 
 
 # Health check
@@ -116,6 +134,120 @@ async def get_dlq_records(limit: int = 100):
         # SELECT * FROM dev.retail.orders_transformation_dlq LIMIT {limit}
         return []
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Bronze layer endpoints
+@app.get("/api/bronze")
+async def get_bronze_data(limit: int = 100, offset: int = 0):
+    """Get raw data from bronze layer (clickstream table)."""
+    try:
+        client = DatabricksSQLClient()
+        data = client.get_bronze_data(limit=limit, offset=offset)
+        return {
+            "data": data,
+            "count": len(data),
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/bronze/count")
+async def get_bronze_count():
+    """Get total count of records in bronze layer."""
+    try:
+        client = DatabricksSQLClient()
+        count = client.get_bronze_count()
+        return {"count": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/databricks/query")
+async def execute_databricks_query(request: DatabricksStatementRequest):
+    """Execute a SQL query directly against Databricks SQL Warehouse."""
+    try:
+        logger.info("=== Databricks Query Request ===")
+        logger.info(f"SQL Statement: {request.statement}")
+        logger.info(f"Warehouse ID: {request.warehouse_id}")
+        logger.info(f"Byte Limit: {request.byte_limit}")
+
+        databricks_host = os.getenv("DATABRICKS_HOST")
+        databricks_token = os.getenv("DATABRICKS_TOKEN")
+        warehouse_id = request.warehouse_id or os.getenv("DATABRICKS_WAREHOUSE_ID", "880e5b3c9bc72fe6")
+
+        logger.info(f"Raw DATABRICKS_HOST from env: {databricks_host}")
+        logger.info(f"Raw DATABRICKS_TOKEN from env: {'[SET]' if databricks_token else '[NOT SET]'}")
+
+        if not databricks_host or not databricks_token:
+            logger.error("Missing Databricks credentials: DATABRICKS_HOST or DATABRICKS_TOKEN not set")
+            raise HTTPException(
+                status_code=500,
+                detail="Databricks credentials not configured"
+            )
+
+        # Remove https:// prefix if it exists in the hostname
+        if databricks_host.startswith("https://"):
+            databricks_host = databricks_host.replace("https://", "")
+        elif databricks_host.startswith("http://"):
+            databricks_host = databricks_host.replace("http://", "")
+
+        # Remove trailing slashes
+        databricks_host = databricks_host.rstrip("/")
+
+        url = f"https://{databricks_host}/api/2.0/sql/statements"
+        logger.info(f"Cleaned Databricks Host: {databricks_host}")
+        logger.info(f"Databricks API URL: {url}")
+
+        headers = {
+            "Authorization": f"Bearer {databricks_token}",
+            "Content-Type": "application/json"
+        }
+        logger.debug(f"Request Headers: Authorization=Bearer [REDACTED], Content-Type=application/json")
+
+        payload = {
+            "warehouse_id": warehouse_id,
+            "statement": request.statement,
+            "byte_limit": request.byte_limit
+        }
+        logger.info(f"Request Payload: {payload}")
+
+        logger.info(f"Sending POST request to Databricks API...")
+        logger.info(f"Request Method: POST")
+        logger.info(f"Request URL: {url}")
+        logger.info(f"Request Headers: {headers}")
+        logger.info(f"Request Body: {payload}")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            logger.info(f"Response Status Code: {response.status_code}")
+            logger.info(f"Response Headers: {dict(response.headers)}")
+            logger.info(f"Response Text: {response.text}")
+
+            if response.status_code != 200:
+                logger.error(f"Databricks API returned non-200 status: {response.status_code}")
+                logger.error(f"Response body: {response.text}")
+
+            try:
+                result = response.json()
+                logger.info(f"Response JSON parsed successfully")
+                logger.debug(f"Response Body: {result}")
+                return result
+            except Exception as json_error:
+                logger.error(f"Failed to parse response as JSON: {json_error}")
+                logger.error(f"Response text was: {response.text}")
+                raise HTTPException(status_code=500, detail=f"Failed to parse Databricks response: {response.text}")
+
+    except httpx.HTTPError as e:
+        logger.error(f"Databricks API HTTP Error: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Full error: {e}")
+        raise HTTPException(status_code=500, detail=f"Databricks API error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in execute_databricks_query: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -38,6 +38,9 @@ variables:
   orders_format:
     description: Format of the orders dataset - "csv" or "parquet".
     default: csv
+  orders_cleaned_path:
+    description: S3 path for the external orders_cleaned Delta table.
+    default: s3://databricks-order/enrich-orders
   stream_landing_dir:
     description: S3 directory Auto Loader watches for new order files.
     default: s3://databricks-order/landing/orders_stream
@@ -56,6 +59,7 @@ resources:
             parameters:
               - "--orders-path=${var.orders_path}"
               - "--orders-format=${var.orders_format}"
+              - "--orders-cleaned-path=${var.orders_cleaned_path}"
               - "--customers-csv=s3://databricks-order/customers.csv"
               - "--catalog=${var.catalog}"
               - "--schema=${var.schema}"
@@ -70,35 +74,35 @@ resources:
             dependencies:
               - ./dist/*.whl
 
-    orders_streaming:
-      name: "[${bundle.target}] orders-medallion-streaming"
-      # Continuous streaming job: Reads from clickstream Delta table at S3
-      # Processes incremental changes in real-time using Spark Structured Streaming
-      max_concurrent_runs: 1
-      continuous:
-        pause_status: UNPAUSED
-      tasks:
-        - task_key: orders_stream
-          # Serverless: attach an environment instead of a job cluster.
-          environment_key: default
-          python_wheel_task:
-            package_name: retail_data_product
-            entry_point: orders_streaming
-            parameters:
-              - "--landing-dir=s3://databricks-order/external-data/"
-              - "--orders-format=parquet"
-              - "--customers-csv=s3://databricks-order/customers.csv"
-              - "--catalog=${var.catalog}"
-              - "--schema=${var.schema}"
-              - "--schema-location=${var.volume_path}/_schemas/orders"
-              - "--checkpoint-location=s3://databricks-order/_checkpoints/orders_stream"
-              - "--processing-time=30 seconds"
-      environments:
-        - environment_key: default
-          spec:
-            client: "3"  # serverless env version (3 -> Python 3.12, matches pyproject)
-            dependencies:
-              - ./dist/*.whl
+    # orders_streaming:
+    #   name: "[${bundle.target}] orders-medallion-streaming"
+    #   # Continuous streaming job: Reads from clickstream Delta table at S3
+    #   # Processes incremental changes in real-time using Spark Structured Streaming
+    #   max_concurrent_runs: 1
+    #   continuous:
+    #     pause_status: UNPAUSED
+    #   tasks:
+    #     - task_key: orders_stream
+    #       # Serverless: attach an environment instead of a job cluster.
+    #       environment_key: default
+    #       python_wheel_task:
+    #         package_name: retail_data_product
+    #         entry_point: orders_streaming
+    #         parameters:
+    #           - "--landing-dir=s3://databricks-order/external-data/"
+    #           - "--orders-format=parquet"
+    #           - "--customers-csv=s3://databricks-order/customers.csv"
+    #           - "--catalog=${var.catalog}"
+    #           - "--schema=${var.schema}"
+    #           - "--schema-location=${var.volume_path}/_schemas/orders"
+    #           - "--checkpoint-location=s3://databricks-order/_checkpoints/orders_stream"
+    #           - "--processing-time=30 seconds"
+    #   environments:
+    #     - environment_key: default
+    #       spec:
+    #         client: "3"  # serverless env version (3 -> Python 3.12, matches pyproject)
+    #         dependencies:
+    #           - ./dist/*.whl
 
 targets:
   dev:
@@ -106,14 +110,21 @@ targets:
     default: true
     workspace:
       host: https://dbc-db4dd419-f099.cloud.databricks.com
+    variables:
+      orders_path: s3://databricks-order/raw-orders
+      orders_format: delta
+      orders_cleaned_path: s3://databricks-order/external-data/orders_cleaned
+      catalog: dev
+      schema: retail
 
   s3:
     mode: development
     workspace:
       host: https://dbc-db4dd419-f099.cloud.databricks.com
     variables:
-      orders_path: s3://databricks-order/external-data/
+      orders_path: s3://databricks-order/raw-orders
       orders_format: delta
+      orders_cleaned_path: s3://databricks-order/enrich-orders
       catalog: dev
       schema: retail
       volume_path: /Volumes/main/retail/landing
